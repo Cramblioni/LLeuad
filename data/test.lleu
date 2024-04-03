@@ -7,7 +7,7 @@ function
         main()
 begin
         local nums = List.new();
-        for i in 0 .. 10 do
+        for i in range(0, 10) do
                 List.append(i);
         end;
         for x in nums do

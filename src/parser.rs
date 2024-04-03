@@ -17,7 +17,7 @@ pub enum TokenType {
     // Symbols
     Colon, SemiColon, Assign, Equals,
     NotEquals, Bang, Greater, Lesser,
-    GreaterSame, LesserSame, Dot,
+    GreaterSame, LesserSame, Dot, Comma,
 
     Asterisk, Percent, ForwardSlash,
     Plus, Minus, 
@@ -33,7 +33,8 @@ pub enum TokenType {
 
     // For error reporting
     ErrorUnrecognisedChunk,
-    ErrorUnterminatedString,
+    ErrorUnterminatedString,    // 
+    ErrorMalformedString,       // 
 }
 
 #[derive(Clone)]
@@ -112,6 +113,14 @@ impl<'a> ScannerState<'a> {
             Some(x) => x != '\n',
         } {}
     }
+    fn lookup_line_num(&self, ind: usize) -> usize {
+        let mut line = 1;
+        for (i, c) in self.source.char_indices() {
+            if i >= ind { break; }
+            if c == '\n' { line += 1 }
+        }
+        return line;
+    }
 }
 
 // To save on indents, this is not a method
@@ -134,6 +143,7 @@ fn step_scanner(this: &mut ScannerState) {
         ':' => this.emit_token(start, TokenType::Colon),
         ';' => this.emit_token(start, TokenType::SemiColon),
         '.' => this.emit_token(start, TokenType::Dot),
+        ',' => this.emit_token(start, TokenType::Comma),
         '(' => this.emit_token(start, TokenType::OpenParen),
         ')' => this.emit_token(start, TokenType::CloseParen),
         '{' => this.emit_token(start, TokenType::OpenBrace),
@@ -224,6 +234,32 @@ fn scanner_long_step(this: &mut ScannerState, start: usize, head: char) {
         return;
     }
     if head == '"' {
+        let mut terminated = false;
+        let mut malformed = false;
+        while match this.peek() {
+            Some(_) => true,
+            None => false,
+        } {
+            let cur = this.pull().unwrap();
+            if cur == '"' || cur == '\n' {
+                terminated = cur == '"';
+                break;
+            }
+            if cur != '\\' { continue; }
+            match this.pull() {
+                Some('n' | 't' | '"') => continue,
+                _ => (),
+            }
+            malformed = true;
+        }
+        let typ = if !terminated {
+            TokenType::ErrorUnterminatedString
+        }else if malformed {
+            TokenType::ErrorMalformedString
+        } else {
+            TokenType::String
+        };
+        this.emit_token(start, typ);
         return;
     }
     while !this.on_boundary() {
@@ -268,6 +304,22 @@ mod test_scanner {
             assert_eq!(a, b);
         }
     }
+
+    #[test]
+    fn comments() {
+        let source = "//comment\nx";
+        let expected = [
+            Token { start: 10, len: 1, typ: TokenType::Ident },
+        ];
+
+        let mut scanner = ScannerState::new(source);
+        while !scanner.at_end() {step_scanner(&mut scanner);}
+        let tokens = scanner.output;
+        
+        for (a, b) in expected.iter().zip(tokens.iter()) {
+            assert_eq!(a, b);
+        }
+    }
     #[test]
     fn error() {
         let source = "#@: `~`";
@@ -288,13 +340,43 @@ mod test_scanner {
 
     #[test]
     fn strings() {
-        let source_success = "\"Hello, World!\"";
-        let source_error   = "\"Ehh, Later";
+        let source_success = "\"Hello!\""; println!("{}", source_success);
+        let source_error1   = "\"Ehh, Later"; println!("{}", source_error1);
+        let source_error2   = "\"-\\2-\""; println!("{}", source_error2);
 
         let mut scanner = ScannerState::new(source_success);
         while !scanner.at_end() {step_scanner(&mut scanner);}
 
-        let mut scanner = ScannerState::new(source_error);
+        assert_eq!(scanner.output[0].typ, TokenType::String);
+
+        let mut scanner = ScannerState::new(source_error1);
         while !scanner.at_end() {step_scanner(&mut scanner);}
+
+        assert_eq!(
+            scanner.output[0].typ,
+            TokenType::ErrorUnterminatedString,
+        );
+
+        let mut scanner = ScannerState::new(source_error2);
+        while !scanner.at_end() {step_scanner(&mut scanner);}
+
+        assert_eq!(
+            scanner.output[0].typ,
+            TokenType::ErrorMalformedString,
+        );
+    }
+    use std::fs;
+    #[test]
+    fn source_file() {
+        let source = fs::read_to_string("./data/test.lleu")
+            .expect("test.lleu is missing");
+
+        let mut scanner = ScannerState::new(&source);
+        while !scanner.at_end() {step_scanner(&mut scanner);}
+
+        for token in scanner.output {
+            println!("{token:?}");
+        }
+        assert!(!scanner.found_error);
     }
 }
