@@ -1,0 +1,83 @@
+(* Lleuad grammar *)
+(*
+    This is an EBNF document with alterations
+    ebnf: https://en.wikipedia.org/wiki/Extended_Backus%E2%80%93Naur_form
+    templates are defined with `$...` in the name.
+
+    This document is used to design the syntax of the language and to provide
+        A spec to base the parser on. This document will not be used to generate
+        The parser.
+
+    Terminals like Names, Strings, and Numbers aren't defined here.
+    How whitespace is handled also isn't defined here.
+*)
+
+root = {declaration, ";"} EOF;
+
+comment = "//", {ANYTHING}, "\n";
+
+(* quite common *)
+(* left associative, an accumulator should be preferred over recursion *)
+ident = name | ident, ".", name;
+
+(* toplevel syntax *)
+declaration = use_stmt | function_def | type_def | variable_def;
+
+statement = (declaration | func_call | assignment | loop_stmt | if_stmt), ";";
+
+(* declaration statements *)
+use_stmt = "use", [name, "from"], import_path, ["as", ident | "as", "*"];
+
+type_def = "type", ident, [type_parameter_list], "=",
+         ( type_expression | type_derivation );
+
+variable_def = ("local" | "const"), ident, [":", type_expression],
+               "=", expression
+
+function_def = ["public"], "function", [type_parameter_list], ident, parameter_list,
+               [":", type_expression], "begin", {statement} "end";
+
+assignment = ident, "=", expression;
+
+type_derivation = "struct", "{", fields, "}";
+
+(* syntax unique to declarations *)
+import_path = '"', path_type, "://", name, {"/" name}, '"';
+path_type = "library" | "module" | "local";
+
+(* extra statements *)
+loop_stmt = ("for", , "in", expression | "while", expression), "do",
+            {statement}, "end";
+
+(* a template for generating list inners *)
+(* this matches any item that ends in `list inner` *)
+list_inner($a) = [list_item($a), {",", list_item($a)}, [","]];
+
+parameter_list = "(", list_inner(parameter), ")";
+list_item(parameter) = name, [":", type_exression];
+
+type_parameter_list = "[", list_inner(type_parameter), "]";
+list_item(type_parameter) = name, [":", type_expression];
+
+(* value expressions *)
+func_call = expression_atom, "(", list_inner(expression), ")";
+list_item(expression) = expression
+
+(* these represent the lowest part of an expression tree *)
+expression_atom = ident | number | string | "(", expression, ")";
+
+(* prefix operators *)
+    (* both numeric and boolean negation *)
+expression_negate     = ["-"|"!"], expression_exponent;
+(* infix operators *)
+expression_exponent   = [expression_exponent, "^"], expression_atom;
+expression_factor     = expression_exponent,
+            [("*"|"/"|"%"), expression factor];
+expression_sum        = expression_factor,
+            [("+"|"-"), expression sum];
+expression_comparison = expression_sum,
+            [("<"|">"|"<="|">="|"=="|"!="), expression_sum];
+
+(* type expressions *)
+type_expression = name, ["<", list_inner(type_expression), ">"];
+list_item(type_expression) = type_expression;

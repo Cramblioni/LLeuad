@@ -1,0 +1,16 @@
+// This is used to test basic functionality
+// to do with the parser :).
+// This program is not intended to be executed
+use "library://std/collections/List"
+
+function
+        main()
+begin
+        local nums = List.new();
+        for i in 0 .. 10 do
+                List.append(i);
+        end;
+        for x in nums do
+                print(x * 2);
+        end;
+end;
