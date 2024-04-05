@@ -18,8 +18,9 @@ pub enum TokenType {
     Colon, SemiColon, Assign, Equals,
     NotEquals, Bang, Greater, Lesser,
     GreaterSame, LesserSame, Dot, Comma,
+    Ampersand, VerticalBar,
 
-    Asterisk, Percent, ForwardSlash,
+    Asterisk, ForwardSlash,
     Plus, Minus, 
     OpenParen, CloseParen,          // ()
     OpenBracket, CloseBracket,      // []
@@ -66,7 +67,9 @@ impl<'a> ScannerState<'a> {
     fn pull(&mut self) -> Option<char> {
         return Some(self.iter.next()?.1);
     }
-    fn at_end(&mut self) -> bool { self.iter.peek().is_none() }
+    fn at_end(&mut self) -> bool {
+        self.iter.peek().is_none()
+    }
     fn position(&mut self) -> usize {
         self.iter.peek().map(|(x,_)|*x)
             .unwrap_or(self.source.len())
@@ -90,7 +93,8 @@ impl<'a> ScannerState<'a> {
         return [
             '+', '-', '*', '/', '%', '>', '<',
             ':', ';', '!', '=', '.', '(', ')',
-            '{', '}', '[', ']', '"',
+            '{', '}', '[', ']', '"', ',', '&',
+            '|',
         ].contains(&test);
     }
     fn hit_eof(&mut self) -> bool {
@@ -139,7 +143,9 @@ fn step_scanner(this: &mut ScannerState) {
         '+' => this.emit_token(start, TokenType::Plus),
         '-' => this.emit_token(start, TokenType::Minus),
         '*' => this.emit_token(start, TokenType::Asterisk),
-        '%' => this.emit_token(start, TokenType::Percent),
+        '&' => this.emit_token(start, TokenType::Ampersand),
+        '|' => this.emit_token(start, TokenType::VerticalBar),
+        '!' => this.emit_token(start, TokenType::Bang),
         ':' => this.emit_token(start, TokenType::Colon),
         ';' => this.emit_token(start, TokenType::SemiColon),
         '.' => this.emit_token(start, TokenType::Dot),
@@ -379,4 +385,18 @@ mod test_scanner {
         }
         assert!(!scanner.found_error);
     }
+}
+
+
+
+// Parsing Time!
+struct Span {
+    start: usize, len: usize
+}
+fn span(start: usize, len: usize) -> Span {
+    Span { start, len }
+}
+
+enum Statement {
+    Expr()
 }

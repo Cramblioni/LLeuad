@@ -26,31 +26,31 @@ declaration = use_stmt | function_def | type_def | variable_def;
 statement = (declaration | func_call | assignment | loop_stmt | if_stmt), ";";
 
 (* declaration statements *)
-use_stmt = "use", [name, "from"], import_path, ["as", ident | "as", "*"];
+use_stmt = "use", import_path, ["as", name];
 
-type_def = "type", ident, [type_parameter_list], "=",
+type_def = "type", [type_parameter_list], name, "=",
          ( type_expression | type_derivation );
 
 variable_def = ("local" | "const"), ident, [":", type_expression],
                "=", expression
 
-function_def = ["public"], "function", [type_parameter_list], ident, parameter_list,
-               [":", type_expression], "begin", {statement} "end";
+function_def = ["public"], "function", [type_parameter_list], function_ident
+                parameter_list, [":", type_expression],
+                "begin", {statement}, "end";
 
 assignment = ident, "=", expression;
 
-type_derivation = "struct", "{", fields, "}";
 
 (* syntax unique to declarations *)
-import_path = '"', path_type, "://", name, {"/" name}, '"';
-path_type = "library" | "module" | "local";
+import_path = import_path_head {".", import_path_item};
+import_path_head = "library", "(", name, ")" | name;
 
+type_derivation = "struct", "{", fields, "}";
 (* extra statements *)
-loop_stmt = ("for", , "in", expression | "while", expression), "do",
+loop_stmt = ("for", name, "in", expression | "while", expression), "do",
             {statement}, "end";
 
 (* a template for generating list inners *)
-(* this matches any item that ends in `list inner` *)
 list_inner($a) = [list_item($a), {",", list_item($a)}, [","]];
 
 parameter_list = "(", list_inner(parameter), ")";
@@ -60,24 +60,27 @@ type_parameter_list = "[", list_inner(type_parameter), "]";
 list_item(type_parameter) = name, [":", type_expression];
 
 (* value expressions *)
-func_call = expression_atom, "(", list_inner(expression), ")";
+func_call = ident, "(", list_inner(expression), ")";
 list_item(expression) = expression
 
 (* these represent the lowest part of an expression tree *)
-expression_atom = ident | number | string | "(", expression, ")";
+expression_atom = ident | number | string;
+expression_nest = expression_atom | "(", expression, ")";
 
 (* prefix operators *)
-    (* both numeric and boolean negation *)
-expression_negate     = ["-"|"!"], expression_exponent;
+expression_negate     = ["-"], expression_nest;
 (* infix operators *)
-expression_exponent   = [expression_exponent, "^"], expression_atom;
-expression_factor     = expression_exponent,
-            [("*"|"/"|"%"), expression factor];
+expression_factor     = expression_negate,
+            [("*"|"/"), expression factor];
 expression_sum        = expression_factor,
             [("+"|"-"), expression sum];
 expression_comparison = expression_sum,
             [("<"|">"|"<="|">="|"=="|"!="), expression_sum];
+expression_precombinative = ["!"], expression_comparison;
+expression_combinative = expression_precombinative,
+            [("&" | "|"), expression_combinative];
 
+expression = expression_combinative;
 (* type expressions *)
-type_expression = name, ["<", list_inner(type_expression), ">"];
+type_expression = name, ["[", list_inner(type_expression), "]"];
 list_item(type_expression) = type_expression;
