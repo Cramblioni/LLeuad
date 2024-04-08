@@ -1,0 +1,30 @@
+// This isn't a runnable program
+// In LLeuad, traits/classes aren't user definable.
+// They are used in the background for polymorphic functions.
+// This is just showing how trait/class methods could be used
+// in Lleuad code.
+
+use library(std).collections.List;
+use library(std).traits.Add;
+use library(std).traits.Traverse;
+
+function
+        sum[val: Add, iter: Traverse](xs: iter[val]): val
+begin
+        local accum = Add.zero[val]();
+        for x in Traverse.traverse(xs) do
+                accum = accum + x;
+        end;
+        return accum;
+end;
+
+function
+        main(): unit
+begin
+        local nums = List.new();
+        for i in range(10) do
+                List.append(nums, i * 2 + 1);
+        end;
+        local num = sum(nums);
+        print(num);
+end

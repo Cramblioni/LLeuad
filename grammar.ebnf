@@ -39,7 +39,7 @@ function_def = ["public"], "function", [type_parameter_list], function_ident
                 "begin", {statement}, "end";
 
 assignment = ident, "=", expression;
-
+return = "return", expression;
 
 (* syntax unique to declarations *)
 import_path = import_path_head {".", import_path_item};
@@ -60,12 +60,13 @@ type_parameter_list = "[", list_inner(type_parameter), "]";
 list_item(type_parameter) = name, [":", type_expression];
 
 (* value expressions *)
-func_call = ident, "(", list_inner(expression), ")";
+func_call = name, {".", name}, "(", list_inner(expression), ")";
 list_item(expression) = expression
 
 (* these represent the lowest part of an expression tree *)
 expression_atom = ident | number | string;
 expression_nest = expression_atom | "(", expression, ")";
+expression_attribute = (expression_ident), []
 
 (* prefix operators *)
 expression_negate     = ["-"], expression_nest;
@@ -80,7 +81,7 @@ expression_precombinative = ["!"], expression_comparison;
 expression_combinative = expression_precombinative,
             [("&" | "|"), expression_combinative];
 
-expression = expression_combinative;
+expression = undefined;
 (* type expressions *)
 type_expression = name, ["[", list_inner(type_expression), "]"];
 list_item(type_expression) = type_expression;

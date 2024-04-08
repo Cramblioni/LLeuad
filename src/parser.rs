@@ -30,7 +30,7 @@ pub enum TokenType {
     Begin, End, Use, Function,
     Local, Const, Public, Type,
     For, In, While, Do, Struct,
-    As,
+    As, Return,
 
     // For error reporting
     ErrorUnrecognisedChunk,
@@ -219,6 +219,7 @@ fn scanner_long_step(this: &mut ScannerState, start: usize, head: char) {
             "do" => this.emit_token(start, TokenType::Do),
             "struct" => this.emit_token(start, TokenType::Struct),
             "as" => this.emit_token(start, TokenType::As),
+            "return" => this.emit_token(start, TokenType::Return),
             _ =>  this.emit_token(start, TokenType::Ident),
         }
         return;
@@ -397,6 +398,6 @@ fn span(start: usize, len: usize) -> Span {
     Span { start, len }
 }
 
-enum Statement {
-    Expr()
+enum Declaration {
+    Usage
 }

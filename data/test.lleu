@@ -1,7 +1,7 @@
 // This is used to test basic functionality
 // to do with the parser :).
 // This program is not intended to be executed
-use "library://std/collections/List"
+use library(std).collections.List;
 
 function
         main()
