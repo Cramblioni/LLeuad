@@ -1,3 +1,4 @@
+use crate::SharedStr;
 use std::str::CharIndices;
 use std::iter::Peekable;
 
@@ -398,6 +399,7 @@ fn span(start: usize, len: usize) -> Span {
     Span { start, len }
 }
 
-enum Declaration {
-    Usage
+
+pub enum Declaration {
+    Usage(Option<SharedStr>, Vec<SharedStr>);
 }

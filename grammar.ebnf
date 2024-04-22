@@ -49,24 +49,25 @@ type_derivation = "struct", "{", fields, "}";
 (* extra statements *)
 loop_stmt = ("for", name, "in", expression | "while", expression), "do",
             {statement}, "end";
+if_stmt = "if", expression, "then",{statement},
+          ["else", {statement}],
+          "end";
 
 (* a template for generating list inners *)
-list_inner($a) = [list_item($a), {",", list_item($a)}, [","]];
+list_inner($a...) = [$a..., {",", $a...}, [","]];
 
-parameter_list = "(", list_inner(parameter), ")";
-list_item(parameter) = name, [":", type_exression];
+parameter_list = "(", list_inner(name, [":", type_exression]), ")";
 
-type_parameter_list = "[", list_inner(type_parameter), "]";
-list_item(type_parameter) = name, [":", type_expression];
+type_parameter_list = "[", list_inner(name, [":", type_expression]), "]";
 
 (* value expressions *)
-func_call = name, {".", name}, "(", list_inner(expression), ")";
-list_item(expression) = expression
+expression_attribute = (indent | func_call | "(", expression, ")"),
+                       [".",  name];
+func_call = expression_attribute, "(", list_inner(expression), ")"; 
 
 (* these represent the lowest part of an expression tree *)
 expression_atom = ident | number | string;
-expression_nest = expression_atom | "(", expression, ")";
-expression_attribute = (expression_ident), []
+expression_nest = expression_atom |  expression_attribute;
 
 (* prefix operators *)
 expression_negate     = ["-"], expression_nest;
@@ -84,4 +85,3 @@ expression_combinative = expression_precombinative,
 expression = undefined;
 (* type expressions *)
 type_expression = name, ["[", list_inner(type_expression), "]"];
-list_item(type_expression) = type_expression;
