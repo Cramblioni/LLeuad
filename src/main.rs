@@ -8,8 +8,7 @@ use std::rc::Rc;
 // without needing to pass around lifetimes. This is used
 // by the interpreter where ownership isn't required.
 // (In rust terms, this is immutable)
-pub type SharedString = Rc<str>;
-
+pub type SharedStr = Rc<str>;
 
 fn main() {
     println!("Hello, world!");

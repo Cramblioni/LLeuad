@@ -1,6 +1,13 @@
+// shared strings
 use crate::SharedStr;
+// iterate over strings getting both characters and indices
 use std::str::CharIndices;
+// Allows us to peek what item an iterator will yield next
 use std::iter::Peekable;
+// Reference counting
+use std::rc::Rc;
+// Interior mutability
+use std::cell::Cell;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Token {
@@ -146,7 +153,6 @@ fn step_scanner(this: &mut ScannerState) {
         '*' => this.emit_token(start, TokenType::Asterisk),
         '&' => this.emit_token(start, TokenType::Ampersand),
         '|' => this.emit_token(start, TokenType::VerticalBar),
-        '!' => this.emit_token(start, TokenType::Bang),
         ':' => this.emit_token(start, TokenType::Colon),
         ';' => this.emit_token(start, TokenType::SemiColon),
         '.' => this.emit_token(start, TokenType::Dot),
@@ -392,14 +398,37 @@ mod test_scanner {
 
 
 // Parsing Time!
-struct Span {
-    start: usize, len: usize
+
+// NOTE: Aim to use `Rc` over `Box` or `&`
+//      We are going to make use of treesharing.
+
+// marks the start and end of this node in the source file.
+pub struct Span {
+    pub start: usize, pub len: usize
 }
 fn span(start: usize, len: usize) -> Span {
     Span { start, len }
 }
 
+pub struct Ast {
+    pub node: SynNode,
+    pub pos: Span,
+}
 
-pub enum Declaration {
-    Usage(Option<SharedStr>, Vec<SharedStr>);
+pub enum SynNode {
+    Ident(SharedStr),
+    IntLit(i64),
+    FloatLit(f64),
+    StringLit(SharedStr),
+
+    TypApplic(Rc<Ast>, Vec<Rc<Ast>>),
+    Attr(Rc<Ast>, Rc<Ast>),
+    Call(Rc<Ast>, Vec<Rc<Ast>>),
+
+    Use(Option<SharedStr>, Vec<SharedStr>),
+    Declare(SharedStr, Rc<Ast>, Rc<Ast>),
+    
+    Return(Option<Rc<Ast>>),
+
+    Function(Vec<SharedStr>),
 }
