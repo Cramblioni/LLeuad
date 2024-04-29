@@ -9,18 +9,31 @@ use std::rc::Rc;
 // Interior mutability
 use std::cell::Cell;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Token {
-    start: usize,
-    len: usize,
+// importing traits to use specific methods
+use std::borrow::Borrow;
+use std::str::FromStr;
+
+// marks the start and end of this node in the source file.
+#[derive(Clone, PartialEq, Debug)]
+pub struct Span {
+    // Cloning `SharedStr` does not reallocate the string
+    pub source: SharedStr, 
+    pub line: u32,  // These shouldn't need to be 64-bit
+    pub column: u32, 
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Token<'a> {
     typ: TokenType,
+    text: &'a str,
+    loc: Span
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum TokenType {
     // Special
     EOF, Ident, ImportPath, Number,
-    String,
+    String, Boolean,
 
     // Symbols
     Colon, SemiColon, Assign, Equals,
@@ -39,28 +52,26 @@ pub enum TokenType {
     Local, Const, Public, Type,
     For, In, While, Do, Struct,
     As, Return,
-
-    // For error reporting
-    ErrorUnrecognisedChunk,
-    ErrorUnterminatedString,    // 
-    ErrorMalformedString,       // 
 }
 
+// This is a pull lexer
 #[derive(Clone)]
 pub struct ScannerState<'a> {
+    file: SharedStr,
     source: &'a str,
     iter: Peekable<CharIndices<'a>>,
-    output: Vec<Token>,
-    found_error: bool,
+    line: u32,
+    column: u32,
 }
 
 impl<'a> ScannerState<'a> {
-    fn new(source: &'a str) -> Self {
+    fn new(filename: &'_ str, source: &'a str) -> Self {
         ScannerState {
+            file: Rc::from(source),
             source: source,
             iter: source.char_indices().peekable(),
-            output: Vec::new(),
-            found_error: false,
+            line: 1,
+            column: 1,
         }
     }
     // Utility functions
@@ -73,14 +84,28 @@ impl<'a> ScannerState<'a> {
         return Some(self.iter.peek()?.clone().1);
     }
     fn pull(&mut self) -> Option<char> {
-        return Some(self.iter.next()?.1);
+        let ret = self.iter.next()?.1;
+        if ret == '\n'{
+            self.column = 1;
+            self.line += 1;
+        } else {
+            self.column += 1;
+        }
+        return Some(ret);
     }
     fn at_end(&mut self) -> bool {
-        self.iter.peek().is_none()
+        return self.iter.peek().is_none();
     }
-    fn position(&mut self) -> usize {
-        self.iter.peek().map(|(x,_)|*x)
-            .unwrap_or(self.source.len())
+    fn byte_position(&mut self) -> usize {
+        return self.iter.peek().map(|(x,_)|*x)
+            .unwrap_or(self.source.len());
+    }
+    fn position(&self) -> Span {
+        return Span {
+            source: Rc::clone(&self.file),
+            line: self.line,
+            column: self.column,
+        };
     }
     
     // This returns `true` iff the current character
@@ -105,19 +130,13 @@ impl<'a> ScannerState<'a> {
             '|',
         ].contains(&test);
     }
-    fn hit_eof(&mut self) -> bool {
-        if self.output.len() == 0 {
-            return false;
-        }
-        return self.output[self.output.len() - 1].typ == TokenType::EOF;
-    }
-    fn emit_token(&mut self, start: usize, typ: TokenType) {
-        let pos = self.position();
-        self.output.push(Token {
-            start: start,
-            len: pos - start,
+    fn create_token(&mut self, start: (Span, usize), typ: TokenType) -> Token<'a> {
+        let pos = self.byte_position();
+        return Token {
+            loc: start.0,
+            text: &self.source[start.1 .. pos],
             typ: typ,
-        });
+        };
     }
     fn skip_comment(&mut self) {
         while match self.pull() {
@@ -125,74 +144,73 @@ impl<'a> ScannerState<'a> {
             Some(x) => x != '\n',
         } {}
     }
-    fn lookup_line_num(&self, ind: usize) -> usize {
-        let mut line = 1;
-        for (i, c) in self.source.char_indices() {
-            if i >= ind { break; }
-            if c == '\n' { line += 1 }
-        }
-        return line;
-    }
+}
+
+fn report<S: Borrow<str>>(loc: Span, message: S) {
+    eprintln!("{}:{}:{}:{}",
+        loc.source, loc.line, loc.column, message.borrow());
 }
 
 // To save on indents, this is not a method
-
-fn step_scanner(this: &mut ScannerState) {
+fn step_scanner<'a>(this: &mut ScannerState<'a>) -> Option<Token<'a>> {
     this.skip_whitespace();
-    let start = this.position();
+    let start = (this.position(), this.byte_position());
     let head = match this.pull() {
         Some(x) => x,
         None => {
-            this.emit_token(start, TokenType::EOF);
-            return;
+            return Some(this.create_token(start, TokenType::EOF));
         }
     };
     match head {
-        '+' => this.emit_token(start, TokenType::Plus),
-        '-' => this.emit_token(start, TokenType::Minus),
-        '*' => this.emit_token(start, TokenType::Asterisk),
-        '&' => this.emit_token(start, TokenType::Ampersand),
-        '|' => this.emit_token(start, TokenType::VerticalBar),
-        ':' => this.emit_token(start, TokenType::Colon),
-        ';' => this.emit_token(start, TokenType::SemiColon),
-        '.' => this.emit_token(start, TokenType::Dot),
-        ',' => this.emit_token(start, TokenType::Comma),
-        '(' => this.emit_token(start, TokenType::OpenParen),
-        ')' => this.emit_token(start, TokenType::CloseParen),
-        '{' => this.emit_token(start, TokenType::OpenBrace),
-        '}' => this.emit_token(start, TokenType::CloseBrace),
-        '[' => this.emit_token(start, TokenType::OpenBracket),
-        ']' => this.emit_token(start, TokenType::CloseBracket),
+        '+' => return Some(this.create_token(start, TokenType::Plus)),
+        '-' => return Some(this.create_token(start, TokenType::Minus)),
+        '*' => return Some(this.create_token(start, TokenType::Asterisk)),
+        '&' => return Some(this.create_token(start, TokenType::Ampersand)),
+        '|' => return Some(this.create_token(start, TokenType::VerticalBar)),
+        ':' => return Some(this.create_token(start, TokenType::Colon)),
+        ';' => return Some(this.create_token(start, TokenType::SemiColon)),
+        '.' => return Some(this.create_token(start, TokenType::Dot)),
+        ',' => return Some(this.create_token(start, TokenType::Comma)),
+        '(' => return Some(this.create_token(start, TokenType::OpenParen)),
+        ')' => return Some(this.create_token(start, TokenType::CloseParen)),
+        '{' => return Some(this.create_token(start, TokenType::OpenBrace)),
+        '}' => return Some(this.create_token(start, TokenType::CloseBrace)),
+        '[' => return Some(this.create_token(start, TokenType::OpenBracket)),
+        ']' => return Some(this.create_token(start, TokenType::CloseBracket)),
 
-        '/' => if this.peek() == Some('/') { this.skip_comment(); }
-                else { this.emit_token(start, TokenType::ForwardSlash); }
+        '/' => if this.peek() == Some('/') {
+                this.skip_comment();
+                return step_scanner(this);
+            } else {
+                return Some(this.create_token(start, TokenType::ForwardSlash));
+            }
 
         '<' => if this.peek() == Some('=') {
                     this.pull();
-                    this.emit_token(start, TokenType::LesserSame);
+                    return Some(this.create_token(start, TokenType::LesserSame));
                 } else {
-                    this.emit_token(start, TokenType::Lesser);
+                    return Some(this.create_token(start, TokenType::Lesser));
                 }
 
         '>' => if this.peek() == Some('=') {
                     this.pull();
-                    this.emit_token(start, TokenType::GreaterSame);
+                    return Some(this.create_token(start, TokenType::GreaterSame));
                 } else {
-                    this.emit_token(start, TokenType::Greater);
+                    return Some(this.create_token(start, TokenType::Greater));
                 }
 
         '!' => if this.peek() == Some('=') {
                     this.pull();
-                    this.emit_token(start, TokenType::NotEquals);
+                    return Some(this.create_token(start, TokenType::NotEquals));
                 } else {
-                    this.emit_token(start, TokenType::Bang);
+                    return Some(this.create_token(start, TokenType::Bang));
                 }
 
         '=' => if this.peek() == Some('=') {
                     this.pull();
-                    this.emit_token(start, TokenType::Equals);
+                    return Some(this.create_token(start, TokenType::Equals));
                 } else {
-                    this.emit_token(start, TokenType::Assign);
+                    return Some(this.create_token(start, TokenType::Assign));
                 }
 
         x   => scanner_long_step(this, start, x),
@@ -201,7 +219,9 @@ fn step_scanner(this: &mut ScannerState) {
 
 // this is for non-trivial tokens
 // also the only error check.
-fn scanner_long_step(this: &mut ScannerState, start: usize, head: char) {
+fn scanner_long_step<'a>
+(this: &mut ScannerState<'a>, start: (Span, usize), head: char)
+-> Option<Token<'a>>{
     if head.is_alphabetic() {
         // do identifier stuff
         while match this.peek() {
@@ -209,27 +229,28 @@ fn scanner_long_step(this: &mut ScannerState, start: usize, head: char) {
             Some(x) => x.is_alphanumeric() || x == '_',
         } { this.pull(); }
         
-        let end = this.position();
-        let ident = &this.source[start .. end];
+        let end = this.byte_position();
+        let ident = &this.source[start.1 .. end];
         match ident {
-            "begin" => this.emit_token(start, TokenType::Begin),
-            "end" => this.emit_token(start, TokenType::End),
-            "use" => this.emit_token(start, TokenType::Use),
-            "function" => this.emit_token(start, TokenType::Function),
-            "local" => this.emit_token(start, TokenType::Local),
-            "const" => this.emit_token(start, TokenType::Const),
-            "public" => this.emit_token(start, TokenType::Public),
-            "type" => this.emit_token(start, TokenType::Type),
-            "for" => this.emit_token(start, TokenType::For),
-            "in" => this.emit_token(start, TokenType::In),
-            "while" => this.emit_token(start, TokenType::While),
-            "do" => this.emit_token(start, TokenType::Do),
-            "struct" => this.emit_token(start, TokenType::Struct),
-            "as" => this.emit_token(start, TokenType::As),
-            "return" => this.emit_token(start, TokenType::Return),
-            _ =>  this.emit_token(start, TokenType::Ident),
+            "begin" => return Some(this.create_token(start, TokenType::Begin)),
+            "end" => return Some(this.create_token(start, TokenType::End)),
+            "use" => return Some(this.create_token(start, TokenType::Use)),
+            "function" => return Some(this.create_token(start, TokenType::Function)),
+            "local" => return Some(this.create_token(start, TokenType::Local)),
+            "const" => return Some(this.create_token(start, TokenType::Const)),
+            "public" => return Some(this.create_token(start, TokenType::Public)),
+            "type" => return Some(this.create_token(start, TokenType::Type)),
+            "for" => return Some(this.create_token(start, TokenType::For)),
+            "in" => return Some(this.create_token(start, TokenType::In)),
+            "while" => return Some(this.create_token(start, TokenType::While)),
+            "do" => return Some(this.create_token(start, TokenType::Do)),
+            "struct" => return Some(this.create_token(start, TokenType::Struct)),
+            "as" => return Some(this.create_token(start, TokenType::As)),
+            "return" => return Some(this.create_token(start, TokenType::Return)),
+            "true" => return Some(this.create_token(start, TokenType::Boolean)),
+            "false" => return Some(this.create_token(start, TokenType::Boolean)),
+            _ =>  return Some(this.create_token(start, TokenType::Ident)),
         }
-        return;
     }
     if head.is_numeric() {
         // do number stuff here
@@ -244,8 +265,7 @@ fn scanner_long_step(this: &mut ScannerState, start: usize, head: char) {
                 Some(x) => x.is_numeric(),
             } { this.pull(); }
         }
-        this.emit_token(start, TokenType::Number);
-        return;
+        return Some(this.create_token(start, TokenType::Number));
     }
     if head == '"' {
         let mut terminated = false;
@@ -266,90 +286,74 @@ fn scanner_long_step(this: &mut ScannerState, start: usize, head: char) {
             }
             malformed = true;
         }
-        let typ = if !terminated {
-            TokenType::ErrorUnterminatedString
-        }else if malformed {
-            TokenType::ErrorMalformedString
-        } else {
-            TokenType::String
-        };
-        this.emit_token(start, typ);
-        return;
+        if !terminated {
+            report(start.0, "unterminated string");
+            return None;
+        } else if malformed {
+            report(start.0, "malformed string");
+            return None;
+        }
+        return Some(this.create_token(start, TokenType::String)); 
     }
     while !this.on_boundary() {
         this.pull();
     };
-    this.found_error = true;
-    this.emit_token(start, TokenType::ErrorUnrecognisedChunk);
+    report(start.0, "unrecognised chunk");
+    return None;
+}
+
+fn peek_scanner<'a>(this: &ScannerState<'a>) -> Option<Token<'a>> {
+    let mut clop = this.clone();
+    return step_scanner(&mut clop);
 }
 
 #[cfg(test)]
 mod test_scanner {
     use super::*;
-    #[test]
-    fn identifier() {
-        // I don't trust my own code :)
-        let mut scanner = ScannerState::new("ident1 begin");
-        while !scanner.at_end() {step_scanner(&mut scanner);}
-        let tokens = scanner.output;
-        assert_eq!(tokens[0].len, 6);
-        assert_eq!(tokens[0].start, 0);
-
-        assert_eq!(tokens[1].typ, TokenType::Begin);
-        assert_eq!(tokens[1].start, 7);
-    }
 
     #[test]
     fn expression() {
         let source = "x * 2 + c";
         let expected = [
-            Token { start: 0, len: 1, typ: TokenType::Ident },
-            Token { start: 2, len: 1, typ: TokenType::Asterisk },
-            Token { start: 4, len: 1, typ: TokenType::Number },
-            Token { start: 6, len: 1, typ: TokenType::Plus },
-            Token { start: 8, len: 1, typ: TokenType::Ident },
+            TokenType::Ident,
+            TokenType::Asterisk,
+            TokenType::Number,
+            TokenType::Plus,
+            TokenType::Ident,
+            TokenType::EOF,
         ];
 
-        let mut scanner = ScannerState::new(source);
-        while !scanner.at_end() {step_scanner(&mut scanner);}
-        let tokens = scanner.output;
-        
-        for (a, b) in expected.iter().zip(tokens.iter()) {
-            assert_eq!(a, b);
+        let mut scanner = ScannerState::new("test.lleu", source);
+        for typ in expected {
+            let tok = step_scanner(&mut scanner).expect("parse error");
+            assert_eq!(typ, tok.typ);
         }
     }
 
     #[test]
     fn comments() {
         let source = "//comment\nx";
-        let expected = [
-            Token { start: 10, len: 1, typ: TokenType::Ident },
-        ];
 
-        let mut scanner = ScannerState::new(source);
-        while !scanner.at_end() {step_scanner(&mut scanner);}
-        let tokens = scanner.output;
-        
-        for (a, b) in expected.iter().zip(tokens.iter()) {
-            assert_eq!(a, b);
-        }
+        let mut scanner = ScannerState::new("test.lleu", source);
+        assert_eq!(
+            step_scanner(&mut scanner).expect("failed parse").typ,
+            TokenType::Ident,
+        );
     }
     #[test]
     fn error() {
         let source = "#@: `~`";
+        let expected = [
+            None,
+            Some(TokenType::Colon),
+            None,
+        ];
         
-        let mut scanner = ScannerState::new(source);
-        while !scanner.at_end() {step_scanner(&mut scanner);}
-        assert!(scanner.found_error);
-
-        assert_eq!(
-            scanner.output[0].typ,
-            TokenType::ErrorUnrecognisedChunk,
-        );
-        assert_eq!(
-            scanner.output[2].typ,
-            TokenType::ErrorUnrecognisedChunk,
-        );
+        let mut scanner = ScannerState::new("test.lleu", source);
+        for typ in expected {
+            let got = step_scanner(&mut scanner).map(|x| x.typ);
+            assert_eq!(typ, got);
+        }
     }
 
     #[test]
@@ -358,25 +362,22 @@ mod test_scanner {
         let source_error1   = "\"Ehh, Later"; println!("{}", source_error1);
         let source_error2   = "\"-\\2-\""; println!("{}", source_error2);
 
-        let mut scanner = ScannerState::new(source_success);
-        while !scanner.at_end() {step_scanner(&mut scanner);}
-
-        assert_eq!(scanner.output[0].typ, TokenType::String);
-
-        let mut scanner = ScannerState::new(source_error1);
-        while !scanner.at_end() {step_scanner(&mut scanner);}
-
+        let mut scanner = ScannerState::new("test.lleu", source_success);
         assert_eq!(
-            scanner.output[0].typ,
-            TokenType::ErrorUnterminatedString,
+            step_scanner(&mut scanner).expect("failed lex").typ,
+            TokenType::String,
         );
 
-        let mut scanner = ScannerState::new(source_error2);
-        while !scanner.at_end() {step_scanner(&mut scanner);}
-
+        let mut scanner = ScannerState::new("test.lleu", source_error1);
         assert_eq!(
-            scanner.output[0].typ,
-            TokenType::ErrorMalformedString,
+            step_scanner(&mut scanner),
+            None,
+        );
+
+        let mut scanner = ScannerState::new("test.lleu", source_error2);
+        assert_eq!(
+            step_scanner(&mut scanner),
+            None,
         );
     }
     use std::fs;
@@ -385,13 +386,14 @@ mod test_scanner {
         let source = fs::read_to_string("./data/test.lleu")
             .expect("test.lleu is missing");
 
-        let mut scanner = ScannerState::new(&source);
-        while !scanner.at_end() {step_scanner(&mut scanner);}
-
-        for token in scanner.output {
-            println!("{token:?}");
+        let mut scanner = ScannerState::new("./data/test.lleu", &source);
+        while let Some(x) = step_scanner(&mut scanner) {
+            match x.typ {
+                TokenType::EOF => return,
+                _ => (),
+            }
         }
-        assert!(!scanner.found_error);
+        assert!(false);
     }
 }
 
@@ -402,33 +404,145 @@ mod test_scanner {
 // NOTE: Aim to use `Rc` over `Box` or `&`
 //      We are going to make use of treesharing.
 
-// marks the start and end of this node in the source file.
-pub struct Span {
-    pub start: usize, pub len: usize
+#[derive(Debug, Clone, PartialEq)]
+struct Expr {
+    loc: Span,
+    node: ExprNode,
 }
-fn span(start: usize, len: usize) -> Span {
-    Span { start, len }
-}
-
-pub struct Ast {
-    pub node: SynNode,
-    pub pos: Span,
-}
-
-pub enum SynNode {
+#[derive(Debug, Clone, PartialEq)]
+enum ExprNode {
     Ident(SharedStr),
-    IntLit(i64),
-    FloatLit(f64),
-    StringLit(SharedStr),
+    Int(i64),
+    Float(f64),
+    String(String),
+    Bool(bool),
 
-    TypApplic(Rc<Ast>, Vec<Rc<Ast>>),
-    Attr(Rc<Ast>, Rc<Ast>),
-    Call(Rc<Ast>, Vec<Rc<Ast>>),
+    Attr(Rc<Expr>, SharedStr),
 
-    Use(Option<SharedStr>, Vec<SharedStr>),
-    Declare(SharedStr, Rc<Ast>, Rc<Ast>),
-    
-    Return(Option<Rc<Ast>>),
+    Call(Rc<Expr>, Vec<Rc<Expr>>),
+    BinOp(BinOper, Rc<Expr>, Rc<Expr>),
+    UnOp(UnOper, Rc<Expr>),
+}
 
-    Function(Vec<SharedStr>),
+#[derive(Debug, Clone, PartialEq)]
+enum BinOper {
+    // numeric
+    Add, Subtract, Multiply, Divide,
+    // Comparisons
+    Greater, GreaterEqual, Lesser, LesserEqual, Equal, NotEqual,
+    // Boolean
+    And, Or,
+}
+#[derive(Debug, Clone, PartialEq)]
+enum UnOper {
+    // numeric
+    Negate,
+    // Boolean
+    Not,
+} 
+
+fn skip_statement(scanner: &mut ScannerState) {
+    loop {
+        let res = step_scanner(scanner);
+        if res.is_none() {
+            continue;
+        }
+        let res = res.unwrap();
+        // This consumes the semicolon
+        if &res.typ == &TokenType::SemiColon {
+            return;
+        }
+        if &res.typ == &TokenType::EOF {
+           return; 
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct ParseError{
+    loc: Span,
+    expected: Vec<TokenType>,
+    got: TokenType,
+}
+
+impl ParseError {
+    fn expected(loc: Span, expected: &[TokenType], got: TokenType) -> ParseError {
+        return ParseError {
+            loc: loc,
+            expected: expected.iter().copied().collect(),
+            got: got,
+        };
+    }
+    fn merge(&mut self, expect: &[TokenType]) {
+        self.expected.extend_from_slice(expect);
+    }
+}
+
+fn parse_literal(this: &mut ScannerState) -> Result<Expr, Option<ParseError>> {
+    use TokenType as TK;
+    match peek_scanner(this).map(|x| x.typ).ok_or(None)? {
+        TK::Ident => {
+            let got = step_scanner(this).unwrap();
+            let ident = SharedStr::from(got.text);
+            let node = ExprNode::Ident(ident);
+            return Ok(Expr{loc: got.loc, node: node});
+        },
+        TK::Number   => {
+            let got = step_scanner(this).unwrap();
+            if got.text.contains('.') {
+                // float
+                let node = ExprNode::Float(f64::from_str(got.text).unwrap()); 
+                return Ok(Expr{loc: got.loc, node: node});
+            } else {
+                // int
+                let node = ExprNode::Int(i64::from_str(got.text).unwrap());
+                return Ok(Expr{loc: got.loc, node: node});
+            }
+        },
+        TK::Boolean  => {
+            let got = step_scanner(this).unwrap();
+            let val = got.text == "true";
+            let node = ExprNode::Bool(val);
+            return Ok(Expr{loc: got.loc, node: node});
+        },
+        TK::String => {
+            let got = step_scanner(this).unwrap();
+            let end = got.text.len().saturating_sub(1);
+            let node = ExprNode::String(String::from(&got.text[1 .. end]));
+            return Ok(Expr{loc: got.loc, node: node});
+        }
+
+        x => {
+            let got = peek_scanner(this).unwrap();
+            return Err(Some(ParseError::expected(got.loc,
+                &[TK::Ident, TK::Number, TK::String, TK::Boolean],
+                x))
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod parser_test {
+    use super::*;
+
+    #[test]
+    fn literals() {
+        let source = "10 9.11 false \"Hello!\" ident";
+        let expected = [
+            ExprNode::Int(10),
+            ExprNode::Float(9.11),
+            ExprNode::Bool(false),
+            ExprNode::String(String::from("Hello!")),
+            ExprNode::Ident(SharedStr::from("ident")),
+        ];
+
+        let mut scanner = ScannerState::new("test.lleu", source);
+        for wants in expected {
+            let result = parse_literal(&mut scanner);
+            assert!(result.is_ok());
+            let result = result.unwrap();
+            assert_eq!(result.node, wants);
+        }
+    }
 }

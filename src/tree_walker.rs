@@ -1,3 +1,4 @@
+/*
 //  This is the tree-walking interpreter part of Lleuad.
 //  Memory will be managed using rust`s Rc to have
 //  reference counting.
@@ -208,3 +209,4 @@ fn interp_node(frame: &mut ContextFrame, node: &Ast) -> bool {
     }
     return false;
 }
+*/
