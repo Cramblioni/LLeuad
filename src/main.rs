@@ -2,6 +2,7 @@
 
 mod parser;
 mod tree_walker;
+mod diag;
 
 use std::rc::Rc;
 // an alternative to `String`, allows sharing the strings

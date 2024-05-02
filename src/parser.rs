@@ -1,5 +1,7 @@
 // shared strings
 use crate::SharedStr;
+// Location information for diagnostics
+use crate::diag::{Span};
 // iterate over strings getting both characters and indices
 use std::str::CharIndices;
 // Allows us to peek what item an iterator will yield next
@@ -12,15 +14,6 @@ use std::cell::Cell;
 // importing traits to use specific methods
 use std::borrow::Borrow;
 use std::str::FromStr;
-
-// marks the start and end of this node in the source file.
-#[derive(Clone, PartialEq, Debug)]
-pub struct Span {
-    // Cloning `SharedStr` does not reallocate the string
-    pub source: SharedStr, 
-    pub line: u32,  // These shouldn't need to be 64-bit
-    pub column: u32, 
-}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Token<'a> {
@@ -101,11 +94,13 @@ impl<'a> ScannerState<'a> {
             .unwrap_or(self.source.len());
     }
     fn position(&self) -> Span {
-        return Span {
-            source: Rc::clone(&self.file),
-            line: self.line,
-            column: self.column,
-        };
+        return Span::new(
+            Rc::clone(&self.file),
+            self.line,
+            self.column,
+            self.byte_position(),
+            0
+        )
     }
     
     // This returns `true` iff the current character
@@ -405,9 +400,11 @@ mod test_scanner {
 //      We are going to make use of treesharing.
 
 #[derive(Debug, Clone, PartialEq)]
-struct Expr {
-    loc: Span,
-    node: ExprNode,
+pub struct Expr {
+    // Location specifics is node dependent
+    // Spans can be read about in [notes/span.md]
+    pub loc: Span,
+    pub node: ExprNode,
 }
 #[derive(Debug, Clone, PartialEq)]
 enum ExprNode {
@@ -425,7 +422,7 @@ enum ExprNode {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-enum BinOper {
+pub enum BinOper {
     // numeric
     Add, Subtract, Multiply, Divide,
     // Comparisons
@@ -434,7 +431,7 @@ enum BinOper {
     And, Or,
 }
 #[derive(Debug, Clone, PartialEq)]
-enum UnOper {
+pub enum UnOper {
     // numeric
     Negate,
     // Boolean
@@ -510,7 +507,13 @@ fn parse_literal(this: &mut ScannerState) -> Result<Expr, Option<ParseError>> {
             let end = got.text.len().saturating_sub(1);
             let node = ExprNode::String(String::from(&got.text[1 .. end]));
             return Ok(Expr{loc: got.loc, node: node});
-        }
+        },
+
+        TK::OpenParen => {
+            step_scanner(this);
+            todo!();
+            step_scanner(this).ok_or(None)?;
+        },
 
         x => {
             let got = peek_scanner(this).unwrap();
@@ -520,6 +523,11 @@ fn parse_literal(this: &mut ScannerState) -> Result<Expr, Option<ParseError>> {
             );
         }
     }
+}
+
+fn parse_unary(this: &mut ScannerState) -> Result<Expr, Option<ParseError>> {
+    let ahead = peek_scanner(this).ok_or(None)?;
+    match 
 }
 
 #[cfg(test)]
